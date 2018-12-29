@@ -1,2 +1,2 @@
-# Projects-DataScience
-Projects - Data Science
+# Projects - Data Science
+Personal learning projects for data science (templates provided by Dataquest.io)
