@@ -1,0 +1,337 @@
+# Modeling Credit Risk
+
+Notes for Machine Learning Project: Model Making Focus (Written in Markdown)
+
+## Introduction
+This document provides some quick notes on a complete machine learning project that was done on credit modeling. It involves the full life cycle of a data science project, with an emphasis on model making.
+
+This is a continuation of a project done on Lending Club's data. The previous parts' notes can be found in the cleanup and features folders. Note that in order provide better readability we will re-import libraries such as pandas so the reader can know what is going on.
+
+In the previous two project parts, we cleaned a dataset and also prepped the features for a machine learning model. Our eventual goal is to feed these features into an optimal model algorithm, which will then make predictions about whether or not the loan will be paid off on time (loan_status column). 
+
+From preparing the data, we removed columns that had data leakage issues, redundantinformation, not useful data, etc. We also cleaned up formatting issues and created some dummy variables from categorical data.
+
+Remember that we also noticed an imbalance in our target column. There are abou 6 times as many positive cases for loan_status than negative, which may cause issues within the machine learning algorithm. We need to keep this in mind while building!
+
+We'll use the cleaned_loans_2007.csv file that contains all of the work done in the previous 2 parts. This is again to create a sort of checkpoint that we can go back to if we wish to use any of the datasets from any of the other parts. Let's get started:
+
+
+# get pandas library
+import pandas as pd
+
+# read in new dataset
+loans = pd.read_csv("cleaned_loans_2007.csv")
+
+# see some info
+print(loans.info())
+
+
+## Error Metric
+Recall the original research question: Can we build a machine learning model that can accurately predict if a borrower will pay off their loan on time or not?
+
+Using this question, we should first pick out a good metric error to base our models on. An error metric will help us measure performance, whether good or bad.
+
+To tie error metrics all the way back to the original question we wanted to answer, let's say we're using a machine learning model to predict whether or not we should fund a loan on the Lending Club platform. Our objective in this is to make money; we want to fund enough loans that are paid off on time to offset our losses from loans that aren't paid off. An error metric will help us determine if our algorithm will make us money or lose us money.
+
+In this case, we're primarily concerned with false positives and false negatives. Both of these are different types of misclassifications. With a false positive, we predict that a loan will be paid off on time, but it actually isn't. This costs us money, since we fund loans that lose us money. With a false negative, we predict that a loan won't be paid off on time, but it actually would be paid off on time. This loses us potential money, since we didn't fund a loan that actually would have been paid off.
+
+Which is worse? From an investor standpoint, we want to minimize risk, so this means avoiding false positives as much as possible. This is "more ok" than missing out on potential money since that involves technically no risk.
+
+We can find the rates of true positives, false positives, true negatives, and false negatives pretty easily in Python with code such as the following, using a randomly generated source of predictions as an example:
+
+
+# False positives.
+fp_filter = (predictions == 1) & (loans["loan_status"] == 0)
+fp = len(predictions[fp_filter])
+
+# True positives.
+tp_filter = (predictions == 1) & (loans["loan_status"] == 1)
+tp = len(predictions[tp_filter])
+
+# False negatives.
+fn_filter = (predictions == 0) & (loans["loan_status"] == 1)
+fn = len(predictions[fn_filter])
+
+# True negatives
+tn_filter = (predictions == 0) & (loans["loan_status"] == 0)
+tn = len(predictions[tn_filter])
+
+
+## Class Imbalance
+Now to deal with the class imbalance of 6:1 positives:negatives. This is a problem because a blind model can just predict 1 for every row and still have a 6/7 accuracy rate on average for the training set.
+
+If we lent out $1000 to every borrower, and made 10% back on our money, we would make $600 for the 6/7 positives in this case and -$1000 lost on the one false positive. We lose $400 for every 7 loans on average! On a 85.7% prediction rate!
+
+Because of this, we don't want to simply use accuracy for our models, but adjust for false positives and false negatives. We should optimize for high recall (true positive rate) and low fallout (false positive rate). An example of these calculations is below:
+
+
+# get numpy library
+import numpy
+
+# Predict that all loans will be paid off on time (example)
+predictions = pd.Series(numpy.ones(loans.shape[0]))
+
+# Rates
+tpr = tp / (tp + fn)
+fpr = fp / (fp + tn)
+
+# see info
+print(tpr)
+print(fpr)
+
+
+Using this code, we'll see that both fpr and tpr are 1. This is because we predicted 1 for each row. This means that we correctly identified all of the good loans (true positive rate), but we also incorrectly identified all of the bad loans (false positive rate).  Now that we've setup error metrics, we can move on to making predictions using a machine learning algorithm.
+
+## Logistic Regression
+Our dataset contains 41 columns, all of which are ints or floats. There are no null values thanks to previous parts of the project, and this means we can apply any machine learning algorithm to the data now.
+
+For this instance, we'll use the Scikit-learn library. Although we can literally build our own models (as done in other projects), using a library saves a lot of time and effort (but understand the underlyig metrics first!), the power of open-source.
+
+For the first model, let's just apply simple logistic regresion. It has the following advantages:
+* it's quick to train and we can iterate more quickly
+* it's less prone to overfitting than more complex models like decision trees
+* it's easy to interpret
+
+We can see an example of the model at work below:
+
+
+# get model from scikit library
+from sklearn.linear_model import LogisticRegression
+
+# create instance of lr
+lr = LogisticRegression()
+
+# create features df from original
+features = loans.drop('loan_status', axis=1)
+
+# create target series from original
+target = loans['loan_status']
+
+# train the model
+lr.fit(features, target)
+
+# make predictions (yes on its own train set for now)
+predictions = lr.predict(features)
+
+
+## Cross Validation
+We know that the predictions just made are probably overfit because we made predictions on our own training set (everything). When we use this to evaluate error, we get an unrealistically high depiction of how accurate the algorithm is, because it already "knows" the correct answers. 
+
+This is like asking someone to memorize a bunch of physics equations, then asking them to plug numbers into the equations. They can tell you the right answer, but they can't explain a concept that they haven't already memorized an equation for.
+
+To account for this, we can use cross-validation to split the data into multiple train and test sets. We'll use the cross_val_predict function to do this.
+
+
+# get cross_val_predict function from model_selection
+from sklearn.model_selection import cross_val_predict
+
+# generate new instance of model
+lr = LogisticRegression()
+
+# generate cross validated predictions for features
+predictions = cross_val_predict(lr, features, target, cv=3)
+
+# convert to series object
+predictions = pd.Series(predictions)
+
+# False positives
+fp_filter = (predictions == 1) & (loans["loan_status"] == 0)
+fp = len(predictions[fp_filter])
+
+# True positives
+tp_filter = (predictions == 1) & (loans["loan_status"] == 1)
+tp = len(predictions[tp_filter])
+
+# False negatives
+fn_filter = (predictions == 0) & (loans["loan_status"] == 1)
+fn = len(predictions[fn_filter])
+
+# True negatives
+tn_filter = (predictions == 0) & (loans["loan_status"] == 0)
+tn = len(predictions[tn_filter])
+
+# rates
+tpr = tp  / (tp + fn)
+fpr = fp  / (fp + tn)
+
+# display rates
+print(tpr)
+print(fpr)
+
+
+## Penalizing Notes
+We saw that both the tpr and fpr are still very close to 1. 
+
+Unfortunately, even through we're not using accuracy as an error metric, the classifier is, and it isn't accounting for the imbalance in the classes. There are a few ways to get a classifier to correct for imbalanced classes. The two main ways are:
+* Use oversampling and undersampling to ensure that the classifier gets input that has a balanced number of each class.
+* Tell the classifier to penalize misclassifications of the less prevalent class more than the other class.
+
+We'll look into oversampling and undersampling first. They involve taking a sample that contains equal numbers of rows where loan_status is 0, and where loan_status is 1. This way, the classifier is forced to make actual predictions, since predicting all 1s or all 0s will only result in 50% accuracy at most.
+
+There are downsides to this technique, however. Since you have to preserve an equal ratio, you have to either:
+* Throw out many rows of data. If we wanted equal numbers of rows where loan_status is 0 and where loan_status is 1, one way we could do that is to delete rows where loan_status is 1.
+* Copy rows multiple times. One way to equalize the 0s and 1s is to copy rows where loan_status is 0.
+* Generate fake data. One way to equalize the 0s and 1s is to generate new rows where loan_status is 0.
+
+Unfortunately, none of these techniques are especially easy. The second method, telling the classifier to penalize certain rows more, is actually much easier to implement using scikit-learn.
+
+We can do this by setting the class_weight parameter to balanced when creating the LogisticRegression instance. This tells scikit-learn to penalize the misclassification of the minority class during the training process. The penalty means that the logistic regression classifier pays more attention to correctly classifying rows where loan_status is 0. This lowers accuracy when loan_status is 1, but raises accuracy when loan_status is 0.
+
+By setting the class_weight parameter to balanced, the penalty is set to be inversely proportional to the class frequencies. You can read more about the parameter here. This would mean that for the classifier, correctly classifying a row where loan_status is 0 is 6 times more important than correctly classifying a row where loan_status is 1. 
+
+How will this extra step now affect the results? Let's find out!
+
+## Penalizing the Classifier
+The code below will demonstrate penalization on the classifier (note that not much has changed at all - literally just the parameter):
+
+
+# create new instance of model with balanced parameter
+lr = LogisticRegression(class_weight="balanced")
+
+# make predictions using cross validation
+predictions = cross_val_predict(lr, features, target, cv=3)
+
+# convert predictions to series
+predictions = pd.Series(predictions)
+
+# False positives
+fp_filter = (predictions == 1) & (loans["loan_status"] == 0)
+fp = len(predictions[fp_filter])
+
+# True positives
+tp_filter = (predictions == 1) & (loans["loan_status"] == 1)
+tp = len(predictions[tp_filter])
+
+# False negatives
+fn_filter = (predictions == 0) & (loans["loan_status"] == 1)
+fn = len(predictions[fn_filter])
+
+# True negatives
+tn_filter = (predictions == 0) & (loans["loan_status"] == 0)
+tn = len(predictions[tn_filter])
+
+# rates
+tpr = tp / (tp + fn)
+fpr = fp / (fp + tn)
+
+# display rates
+print(tpr)
+print(fpr)
+
+
+## Manual Penalties
+As we now see, the false positive rate was significantly improved, which in turn reduced the true positive rate as well. They are now sitting at 67% for the tpr and 40% for the fpr.
+
+From a conservative investor's standpoint, it's reassuring that the false positive rate is lower because it means that we'll be able to do a better job at avoiding bad loans than if we funded everything. However, we'd only ever decide to fund 67% of the total loans (true positive rate), so we'd immediately reject a good amount of loans.
+
+We can try to lower the false positive rate further by assigning a harsher penalty for misclassifying the negative class. While setting class_weight to balanced will automatically set a penalty based on the number of 1s and 0s in the column, we can also set a manual penalty. In our example code above, the penalty scikit-learn imposed for misclassifying a 0 would have been around 5.89 (since there are 5.89 times as many 1s as 0s).
+
+We can also specify a penalty manually if we want to adjust the rates more. To do this, we need to pass in a dictionary of penalty values to the class_weight parameter (the code below will penalize at a weight of 10 instead of 5.89):
+
+
+# create penalty dict
+penalty = {
+    0: 10,
+    1: 1
+}
+
+# create new instance of model with parameter penalty dict
+lr = LogisticRegression(class_weight=penalty)
+
+# make predictions using cross validation
+predictions = cross_val_predict(lr, features, target, cv=3)
+
+# convert to Series
+predictions = pd.Series(predictions)
+
+# False positives
+fp_filter = (predictions == 1) & (loans["loan_status"] == 0)
+fp = len(predictions[fp_filter])
+
+# True positives
+tp_filter = (predictions == 1) & (loans["loan_status"] == 1)
+tp = len(predictions[tp_filter])
+
+# False negatives
+fn_filter = (predictions == 0) & (loans["loan_status"] == 1)
+fn = len(predictions[fn_filter])
+
+# True negatives
+tn_filter = (predictions == 0) & (loans["loan_status"] == 0)
+tn = len(predictions[tn_filter])
+
+# rates
+tpr = tp / (tp + fn)
+fpr = fp / (fp + tn)
+
+# display rates
+print(tpr)
+print(fpr)
+
+
+It looks like assigning manual penalties lowered the false positive rate to 7%, and thus lowered our risk. Note that this comes at the expense of true positive rate. While we have fewer false positives, we're also missing opportunities to fund more loans and potentially make more money. Given that we're approaching this as a conservative investor, this strategy makes sense, but it's worth keeping in mind the tradeoffs.
+
+## Random Forests
+While we could tweak the penalties further, it's best to move to trying a different model right now, for larger potential false positive rate gains. We can always loop back and iterate on the penalties more later.
+
+Let's try a more complex algorithm: random forest. 
+
+Random forests are able to work with nonlinear data, and learn complex conditionals. Logistic regressions are only able to work with linear data. Training a random forest algorithm may enable us to get more accuracy due to columns that correlate nonlinearly with loan_status.
+
+Scikit also allows us to implement this relatively easily, like so:
+
+
+# import random forests
+from sklearn.ensemble import RandomForestClassifier
+
+# generate random forests instance with proper parameters
+# note random_state will be commented out in real life
+# other weights can be used like before too with the dict
+rf = RandomForestClassifier(class_weight="balanced", random_state=1)
+
+# make predictions as before
+predictions = cross_val_predict(rf, features, target, cv=3)
+
+# convert to series as before
+predictions = pd.Series(predictions)
+
+# False positives
+fp_filter = (predictions == 1) & (loans["loan_status"] == 0)
+fp = len(predictions[fp_filter])
+
+# True positives
+tp_filter = (predictions == 1) & (loans["loan_status"] == 1)
+tp = len(predictions[tp_filter])
+
+# False negatives
+fn_filter = (predictions == 0) & (loans["loan_status"] == 1)
+fn = len(predictions[fn_filter])
+
+# True negatives
+tn_filter = (predictions == 0) & (loans["loan_status"] == 0)
+tn = len(predictions[tn_filter])
+
+# rates
+tpr = tp / (tp + fn)
+fpr = fp / (fp + tn)
+
+# display rates
+print(tpr)
+print(fpr)
+
+
+## Conclusion
+Unfortunately, using a random forest classifier didn't improve our false positive rate. The model is likely weighting too heavily on the 1 class, and still mostly predicting 1s. We could fix this by applying a harsher penalty for misclassifications of 0s.
+
+Ultimately, our best model had a false positive rate of 7%, and a true positive rate of 20%. For a conservative investor, this means that they make money as long as the interest rate is high enough to offset the losses from 7% of borrowers defaulting, and that the pool of 20% of borrowers is large enough to make enough interest money to offset the losses.
+
+If we had randomly picked loans to fund, borrowers would have defaulted on 14.5% of them, and our model is better than that, although we're excluding more loans than a random strategy would. Given this, there's still quite a bit of room to improve:
+* We can tweak the penalties further.
+* We can try models other than a random forest and logistic regression.
+* We can use some of the columns we discarded to generate better features.
+* We can ensemble multiple models to get more accurate predictions.
+* We can tune the parameters of the algorithm to achieve higher performance.
+
+There are many ways to perfect a machine learning models, and as mentioned before, tweaking never stops!
+
+All of the basics are there, and only practice makes perfect as this point.

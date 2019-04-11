@@ -1,0 +1,158 @@
+# Modeling Credit Risk
+
+Notes for Machine Learning Project: Feature Prepping Focus (Written in Markdown)
+
+## Introduction
+This document provides some quick notes on a complete machine learning project that was done on credit modeling. It involves the full life cycle of a data science project, with an emphasis on feature prepping.
+
+This is a continuation of a project done on Lending Club's data. The previous part notes can be found in the cleanup folder. Note that in order provide better readability we will re-import libraries such as pandas so the reader can know what is going on.
+
+In the previous part, we removed all columns that contained either redundant or irrelevant information. This new filtered dataframe was expoted to a file filtered_loans_2007.csv. This is so if we wanted to use the raw loans_2007 file again, it is there to use.
+
+In this part, we will prepare the data for a model by handling missing values, converting value types, and overall just preparing the features to use.
+
+The underlying mathematics of most machine learning models assume that the data is numerical and that there are no missing values. For example, in Python, scikit-learn will return an error for most models if either of these things are not true.
+
+To fix this, we'll start by looking at some missing values, then focus on converting from categoical to numerical. The code for this quick bit of work is below:
+
+
+# get libraries
+import pandas as pd
+
+# read in data
+loans = pd.read_csv("filtered_loans_2007.csv")
+
+# get number of nulls in each column
+null_counts = loans.isnull().sum()
+
+# display data
+print(null_counts)
+
+
+## Handling Missing Values
+While most of the columns have 0 missing values, 2 columns have 50 or less rows with missing values and 1 column has 697 rows. We can arbitrarily decide to remove columns altogether where more than 1% of rows are missing, else just remove the rows that contain missing values if it is <= 1%.
+
+This means that we will remove rows for the title, revol_util, and last_credit_pull_d columns, while we will drop the pub_rec_bankruptcies column entirely. This is demonstrated below:
+
+
+# drop pub_rec_bankruptcies from loans
+loans.drop("pub_rec_bankruptcies", axis=1, inplace=True)
+
+# dropna to remove all rows from loans with missing values
+loans.dropna(axis=0, inplace=True)
+
+# see the counts for each column data type
+print(loans.dtypes.value_counts())
+
+
+## Text Columns
+Now we can work on conversion. We can "pop out" just the object columns in a new temp df for exploration and see how they're formatted. An example of this is provided here.
+
+
+# get a temp df with just object columns
+object_columns_df = loans.select_dtypes(include=['object'])
+
+# display the first row to see
+print(object_columns_df.head(1))
+
+
+## Text Columns Explained
+Some of the columns seem like they represent categorical values, but we should confirm by checking the number of unique values in those columns:
+* home_ownership: home ownership status, can only be 1 of 4 categorical values according to the data dictionary
+* verification_status: indicates if income was verified by Lending Club
+* emp_length: number of years the borrower was employed upon time of application
+* term: number of payments on the loan, either 36 or 60
+* addr_state: borrower's state of residence
+* purpose: a category provided by the borrower for the loan request
+* title: loan title provided the borrower
+
+There are also some columns that represent numeric values, that need to be converted:
+* int_rate: interest rate of the loan in %
+* revol_util: revolving line utilization rate or the amount of credit the borrower is using relative to all available credit
+
+Also, Based on the first row's values for purpose and title, it seems like these columns could reflect the same information. We can explore the unique value counts separately to confirm if this is true.
+
+Lastly, some of the columns contain date values that would require a good amount of feature engineering for them to be potentially useful:
+* earliest_cr_line: The month the borrower's earliest reported credit line was opened
+* last_credit_pull_d: The most recent month Lending Club pulled credit for this loan
+
+Since these date features require some feature engineering for modeling purposes, let's remove these date columns from the Dataframe.
+
+## First 5 Cat Columns
+Let's explore the unique value counts of the columnns that seem like they contain categorical values below:
+
+
+# list of columns to be explored
+cols = ['home_ownership', 'verification_status', 'emp_length', 'term', 'addr_state']
+
+# for each col...get value counts
+for col in cols:
+    print(loans[col].value_counts(), "\n")
+
+
+## The Reason for the Loan
+The home_ownership, verification_status, emp_length, term, and addr_state columns all contain multiple discrete values. We should clean the emp_length column and treat it as a numerical one since the values have ordering (2 years of employment is less than 8 years).
+
+First, let's look at the unique value counts for the purpose and title columns to understand which column we want to keep:
+
+
+# get value counts for purpose and title
+print(loans["purpose"].value_counts())
+print(loans["title"].value_counts())
+
+
+# Cat Columns Continued
+The home_ownership, verification_status, emp_length, and term columns each contain a few discrete categorical values. We should encode these columns as dummy variables and keep them.
+
+It seems like the purpose and title columns do contain overlapping information but we'll keep the purpose column since it contains a few discrete values. In addition, the title column has data quality issues since many of the values are repeated with slight modifications (e.g. Debt Consolidation and Debt Consolidation Loan and debt consolidation).
+
+The mapping that we provide in the code below can help with the cleaning of the emp_length column. Notice that we're being a bit conservative with our mappings, rounding >10 years to 10 and <1 year to 0. This is a quick workaround heuristic, so it is probably pretty accurate, just not perfect.
+
+Finally, the addr_state column contains many discrete values and we'd need to add 49 dummy variable columns to use it for classification. This would make our Dataframe much larger and could slow down how quickly the code runs. Let's remove this column from consideration.
+
+
+# create mapping dict for emp_length
+mapping_dict = {
+    "emp_length": {
+        "10+ years": 10,
+        "9 years": 9,
+        "8 years": 8,
+        "7 years": 7,
+        "6 years": 6,
+        "5 years": 5,
+        "4 years": 4,
+        "3 years": 3,
+        "2 years": 2,
+        "1 year": 1,
+        "< 1 year": 0,
+        "n/a": 0
+    }
+}
+
+# remove columns we deemed unneccessary 
+loans.drop(["last_credit_pull_d", "addr_state", "title", "earliest_cr_line"], axis=1, inplace=True)
+
+# convert int_rate and revol_util to floats
+loans['int_rate'] = loans['int_rate'].str.rstrip('%').astype("float")
+loans['revol_util'] = loans['revol_util'].str.rstrip('%').astype("float")
+
+# clean up emp_length column
+loans = loans.replace(mapping_dict)
+
+
+## Dummy Variables
+Let's now encode the home_ownership, verification_status, purpose, and term columns as dummy variables so we can use them in our model. We can make a new df containing a new column for each dummy variable and then concatenate it onto the loans df (and then drop the original columns because we don't need them anymore).
+
+
+# encode the home_ownership, verification_status, purpose, and term columns
+dummy_df = pd.get_dummies(loans[['home_ownership', 'verification_status', 'purpose', 'term']])
+loans = pd.concat([loans, dummy_df], axis=1)
+loans.drop(['home_ownership', 'verification_status', 'purpose', 'term'], axis=1, inplace=True)
+
+
+## Conclusion
+After 2 parts of the project, we finally have our preparation done and ready to start building some models! To recap, we converted all of the columns to numerical values because those are the only type of value scikit-learn can work with.
+
+Even though both parts so far were "cleanup", this part of the project differed from the first part in that th first part was general data cleanup that can be done and repeated for just about any project (not just machine learning), while this part of the project focused specifically on prepping the features that we want for our model.
+
+Next (and finally!), we will start training some models and evaluating the accuracy of each one usin cross-validation to find the optimal way to predict credit risk.
