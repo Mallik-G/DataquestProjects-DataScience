@@ -1,0 +1,206 @@
+# Modeling Credit Risk
+
+Notes for Machine Learning Project: Data Cleaning Focus (Written in Markdown)
+
+## Introduction
+This document provides some quick notes on a complete machine learning project that was done on credit modeling. It involves the full life cycle of a data science project, with an emphasis on data cleaning.
+
+Credit modeling is a well known data science problem that focuses on modeling a borrower's credit risk. Credit has played a key role in the economy for centuries and some form of credit has existed since the beginning of commerce. The data that we will be using is from Lending Club (attached). Lending club is a marketplace for personal loans that matches borrowers who are seeking a loan with investors looking to lend money and make a return.
+
+Here is a simple breakdown of how it works:
+* Each borrower fills out an application with their financial history for the loan.
+* Lending Club evaluates this information with their own data science process to output an interest rate.
+* After verifying that the information provided by the borrower is correct (not faulty data), they return the rate to the borrower.
+
+Obviously, the higher the interest rate, the riskier the borrower is deemed to be (kind of counter-intuitive if you think about it). Rates can range from 5.32% all the way to 30.99%, and each borrower is given a grade (like academics) according to their rate. The borrower has the choice whether or not to accept this rate, of course.
+
+Investors are focued on ROI (return on their investment). Once a borrower accepts, the loan is approved and listed on the site marketplace, where qualified investors can browse and select which borrower they like to invest in. Once they've selected a good candidate, they submit the amount they would like to fund (partial or full) until the loan is fulfilled, at which point the borrower receives the money minus some fees.
+
+After receiving the money, the borrower then makes payments back to Lending Club (middle man for investors) over 36 months or 60 months (choice). This is good for both parties because the borrower can pay over time and the investor starts to get money back right away. Once the loan is fully repaid with interest, the borrower got what they wanted, and the investor got a nice ROI!
+
+There is risk, however. Many loans are not completely paid off on time, and some are not paid at all. This leads to some borrowers defaulting on the loan, which pretty much means a loss of money for the investor. All they can do is lower the credit rate significantly for the borrower so they do not hurt anyone else in the future (without gaining credability back slowly first).
+
+This means that Lending Club has to be extremely rigorous with their credit modeling to protect both the investors and the borrowers from securing an unfair interest rate. Investors also need to be rigorous about choosing which borrower to invest in and who is likely to pay back. There comes a natural trade-off in securing a low interest rate with a good history or a potential high interest rate and high return with a weak history.
+
+Most investors use a portfolio to diversify risk and invest in many small amounts across a range of interest rates. For the purpose of this project, we are the investor!
+
+We will characterize ourselves as a conservative invesor wh only wants to invest in the loans that have a good chance in being paid back. We'll need to look at the features in the dataset by Lending Club first to see what we're dealing with, then build a model that reliably predicts if a loan will be paid back in full or not.
+
+## The Dataset
+Lending Club publicly releases all data for approved and declined loan applications. You can adjust the years you want, and out pops a CSV dataset.
+
+There is also a corresponding data dictionary that contains information about the column names that can be found here: https://docs.google.com/spreadsheets/d/191B2yJ4H1ZPXq0_ByhUgWMFZOYem5jFz0Y3by_7YBY4/edit#gid=2081333097
+
+Some notes on the dictionary:
+* The LoanStats sheet describes approved loans.
+* The RejectStats sheet describes rejected loans (as an investor we probaly are not interested in this).
+* The LoanStats sheet has information on current, completed, and defaulted loans.
+* We will use the features in this sheet to figure out what we want and which columns to use as target.
+
+We can narrow down our project to the research question of: Can we build a machine learning model that can accurately predict if a borrower will pay off their loan on time or not?
+
+## Reading Data
+
+We focused on data from 2007 to 2011 in this dataset, since we wanted both recent data but also not too recent because we want to know if the loans finished or not. This can be found in the LoanStats3a.csv file.
+
+The original dataset from Lending Club was reduced into a more optimal dataset by doing the following:
+* removing the first line (descriptive data about Lending Club)
+* removing the desc column (descripive info about each loan)
+* removing the url column (link to each loan - requires login)
+* removing all columns containing >50% missing values (irrelevant columns anyway)
+
+This was done with the following code:
+
+
+import pandas as pd
+loans_2007 = pd.read_csv('LoanStats3a.csv', skiprows=1)
+half_count = len(loans_2007) / 2
+loans_2007 = loans_2007.dropna(thresh=half_count, axis=1)
+loans_2007 = loans_2007.drop(['desc', 'url'],axis=1)
+loans_2007.to_csv('loans_2007.csv', index=False)
+
+
+The new and improved dataset is found in the loans_2007.csv file. It is saved in a new csv in case we ever needed the raw one later. Next, we read in and explored the new dataset with the following:
+
+
+# read in data
+loans_2007 = pd.read_csv("loans_2007.csv")
+
+# see first line and shape
+print(loans_2007.head(1))
+print(loans_2007.shape)
+
+
+## First Group of Columns
+There were/are 52 columns in total, so exploring all at once is a tall task. Instead, we can break up the columns into 3 groups of 18 to determine features. We have to remember that we're also looking for any columns that:
+* leak information from the future (after the loan has already been funded).
+* don't affect a borrower's ability to pay back a loan (e.g. a randomly generated ID value by Lending Club).
+* formatted poorly and need to be cleaned up.
+* require more data or a lot of processing to turn into a useful feature.
+* contain redundant information.
+
+The first part is especially important, since that can really overfit our model. This is because the model would be using data about the target column that wouldn't be available when we're using the model on future loans.
+
+Going through the columns one by one is important in order to understand what each one is doing and to select the right ones for the model and analysis process. We also need to keep in mind that we want to chooose a target column to predict.
+
+For now, we focus on what columns we want to remove. This makes it easier for selection of the ones remaining later. Looking at the first 18 columns (found in the df and in the data dictionary provided), we determine that the following are irrelevant and can be removed:
+* id: randomly generated field by Lending Club for unique identification purposes only
+* member_id: also a randomly generated field by Lending Club for unique identification purposes only
+* funded_amnt: leaks data from the future (after the loan is already started to be funded)
+* funded_amnt_inv: also leaks data from the future (after the loan is already started to be funded)
+* grade: contains redundant information as the interest rate column (int_rate)
+* sub_grade: also contains redundant information as the interest rate column (int_rate)
+* emp_title: requires other data and a lot of processing to potentially be useful
+* issue_d: leaks data from the future (after the loan is already completed funded)
+
+Regarding the grade and sub_grade columns: even though these may seem like good categories a fist, the int_rate column contains directly correlated data that is continuous, which is better suited for machine learning (at least in our case). This highlights the value of analyzing each column one by one! We can remove the chosen columns with the code:
+
+
+# drop first set of columns
+loans_2007.drop(['id', 'member_id', 'funded_amnt', 'funded_amnt_inv', 'grade', 'sub_grade', 'emp_title', 'issue_d'], axis=1, inplace=True)
+
+
+## Second Group of Columns
+Similar process with the next 18 columns; we see that the following can be dropped:
+*zip_code: redundant with the addr_state column since only the first 3 digits of the 5 digit zip code are visible (which only can be used to identify the state the borrower lives in)
+* out_prncp: leaks data from the future, (after the loan already started to be paid off)
+* out_prncp_inv: also leaks data from the future, (after the loan already started to be paid off)
+* total_pymnt: also leaks data from the future, (after the loan already started to be paid off)
+* total_pymnt_inv: also leaks data from the future, (after the loan already started to be paid off)
+* total_rec_prncp: also leaks data from the future, (after the loan already started to be paid off)
+
+The out_prncp and out_prncp_inv both describe the outstanding principal amount for a loan, which is the remaining amount the borrower still owes. These 2 columns as well as the total_pymnt column describe properties of the loan after it's fully funded and started to be paid off. This information isn't available to an investor before the loan is fully funded and we don't want to include it in our model. Again, we can drop with the code:
+
+
+# drop second set of columns
+loans_2007.drop(['zip_code', 'out_prncp', 'out_prncp_inv', 'total_pymnt', 'total_pymnt_inv', 'total_rec_prncp'], axis=1, inplace=True)
+
+
+## Third Group of Columns
+And one last time, with the last 18 columns, the droppable columns are:
+* total_rec_int: leaks data from the future, (after the loan already started to be paid off)
+* total_rec_late_fee: also leaks data from the future, (after the loan already started to be paid off)
+* recoveries: also leaks data from the future, (after the loan already started to be paid off)
+* collection_recovery_fee: also leaks data from the future, (after the loan already started to be paid off)
+* last_pymnt_d: also leaks data from the future, (after the loan already started to be paid off)
+* last_pymnt_amnt: also leaks data from the future, (after the loan already started to be paid off)
+
+All of these columns leak data from the future, meaning that they're describing aspects of the loan after it's already been fully funded and started to be paid off by the borrower. Again, removal with:
+
+
+# drop third set of columns
+loans_2007.drop(['total_rec_int', 'total_rec_late_fee', 'recoveries', 'collection_recovery_fee', 'last_pymnt_d', 'last_pymnt_amnt'], axis=1, inplace=True)
+
+# display final first row and new shape
+print(loans_2007.head(1))
+print(loans_2007.shape)
+
+
+## Target Column
+Now that we reduced our number of columns almost in half, we can begin to look for a target column for modeling.
+
+After going through the data again, the loan_status column looks to be a good candidate. This is the only column that directly shows if a loan was paid off on time, had delayed payments, or was defaulted. The only problem is this column is currently in text form and needs to be converted to use in a model. We explore the column more below:
+
+
+# get value counts for target and print
+freq = loans_2007['loan_status'].value_counts()
+print(freq)
+
+
+# Binary Classification
+There are 8 differet possible values for the loan_status column as we saw. Information on each can be found in the data dictionary.
+
+From the investor's (our) perspective, in simplest form we are only interested in whether or not loans will be paid off in time. Only the "Fully Paid" and "Charged Off" values describe these outcomes in loan_status. The other values are ambiguous at best and could go either way.
+
+Note: While the "Default" value could also mean not paid off in time, the documentation describes "Charged Off" as officially not paid off in time, while "Default" technically means there is still a small chance it could be. There are only 3 rows with this value anyhow.
+
+Because of this, we can use binary classification. We remove all rows that do not contain either "Fully Paid" or "Charged Off", and then change the rows that do have them to a 1 or 0 value, respectively. This will be done with the df.replace method.
+
+Lastly, we also have to keep in mind the class imbalance. There are a lot more positive cases than negative ones (33136 fully paid vs. 5634 charged off). This is a common problem in real world datasets and makes the model have a strong bias towards predicting the class with more observations. We will deal with this later. For now, we replace what we mentioned by doing:
+
+
+# get rid of rows that we do not want
+loans_2007 = loans_2007[(loans_2007['loan_status'] == "Fully Paid") | (loans_2007['loan_status'] == "Charged Off")]
+
+# make dict to replace values with
+status_replace = {
+    "loan_status" : {
+        "Fully Paid": 1,
+        "Charged Off": 0,
+    }
+}
+
+# use dict to replace
+loans_2007 = loans_2007.replace(status_replace)
+
+
+## Single Value Columns
+Finally, to wrap up this part we can look for any columns that only contain a single unique value and remove them. These columns are not really useful for the model since the model doesn't really have any new information there. As an added benefit, the number of features we will need to look at also gets reduced again.
+
+To compute unique values, we'll use the Series.unique method to return unique values as well as NaNs. Since we're trying to find columns that contain one true unique value, we should first drop the null values then compute the number of unique values. We can do this with:
+
+
+# create empty list to keep track of drop columns
+drop_columns = []
+
+# for each column drop nulls, get uniques, and append if only 1
+for col in loans_2007:
+    no_null = loans_2007[col].dropna()
+    uniques = no_null.unique()
+    num_unique = len(uniques)
+    if num_unique == 1:
+        drop_columns.append(col)
+
+# use the list to drop appropriate columns
+loans_2007.drop(drop_columns, axis=1, inplace=True)
+
+# see which columns removed
+print(drop_columns)
+
+
+## Conclusion
+We were able to remove 9 more columns, bringing our total potential features to 22 with 1 target. 
+
+We got familiar with the columns and dataset and cleaned up what was needed so far for modeling. A target column was also selected and it was decided that our model would be using binary classification.
+
+In the next step of this project (separate .txt notes file), we will explore the individual features in greater depth and work towards training the machine learning model.
